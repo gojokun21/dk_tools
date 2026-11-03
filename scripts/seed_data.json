@@ -75,5 +75,58 @@
       {"item_code": "CMP-SENZOR", "qty": 1},
       {"item_code": "CMP-CABLU", "qty": 1}
     ]
+  },
+  "transactions": [
+    {
+      "id": "P1",
+      "type": "purchase",
+      "supplier": "Electro Parts SRL",
+      "material_request": true,
+      "pay": true,
+      "items": [
+        {"item_code": "CMP-PLACA", "qty": 50},
+        {"item_code": "CMP-SENZOR", "qty": 50},
+        {"item_code": "CMP-CABLU", "qty": 50}
+      ]
+    },
+    {
+      "id": "P2",
+      "type": "purchase",
+      "supplier": "Plastix SRL",
+      "material_request": false,
+      "pay": true,
+      "items": [{"item_code": "CMP-CARCASA", "qty": 50}]
+    },
+    {"id": "M1", "type": "manufacture", "item": "KIT-TEMP", "qty": 20},
+    {
+      "id": "S1",
+      "type": "sale",
+      "customer": "Alfa Tech SRL",
+      "quotation": true,
+      "deliver": true,
+      "pay": true,
+      "items": [{"item_code": "KIT-TEMP", "qty": 10}, {"item_code": "SRV-INSTALARE", "qty": 1}]
+    },
+    {
+      "id": "S2",
+      "type": "sale",
+      "customer": "Beta Industries SRL",
+      "quotation": false,
+      "deliver": true,
+      "pay": false,
+      "items": [{"item_code": "KIT-TEMP", "qty": 5}]
+    }
+  ],
+  "expected": {
+    "stock": [
+      {"item_code": "CMP-CARCASA", "warehouse": "Materii Prime - DK", "qty": 30},
+      {"item_code": "CMP-PLACA", "warehouse": "Materii Prime - DK", "qty": 30},
+      {"item_code": "CMP-SENZOR", "warehouse": "Materii Prime - DK", "qty": 30},
+      {"item_code": "CMP-CABLU", "warehouse": "Materii Prime - DK", "qty": 30},
+      {"item_code": "KIT-TEMP", "warehouse": "Produse Finite - DK", "qty": 5}
+    ],
+    "empty_warehouse": "Lucru in Curs - DK",
+    "receivable": {"Alfa Tech SRL": 0, "Beta Industries SRL": 2250},
+    "payable_total": 0
   }
 }

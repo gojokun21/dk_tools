@@ -1,6 +1,7 @@
 import json
 import os
 import sys
+from datetime import date, timedelta
 from pathlib import Path
 from urllib.parse import quote
 
@@ -8,6 +9,20 @@ import requests
 
 HERE = Path(__file__).resolve().parent
 DATA_FILE = HERE / "seed_data.json"
+STATE_FILE = HERE / "seed_state.json"
+TODAY = date.today()
+NEXT_WEEK = str(TODAY + timedelta(days=7))
+
+# Funcțiile de mapare din ERPNext (secțiunea 6.3)
+MAKE_PO_FROM_MR = "erpnext.stock.doctype.material_request.material_request.make_purchase_order"
+MAKE_PR = "erpnext.buying.doctype.purchase_order.purchase_order.make_purchase_receipt"
+MAKE_PI = "erpnext.stock.doctype.purchase_receipt.purchase_receipt.make_purchase_invoice"
+MAKE_SO_FROM_QTN = "erpnext.selling.doctype.quotation.quotation.make_sales_order"
+MAKE_DN = "erpnext.selling.doctype.sales_order.sales_order.make_delivery_note"
+MAKE_SI = "erpnext.stock.doctype.delivery_note.delivery_note.make_sales_invoice"
+MAKE_SE = "erpnext.manufacturing.doctype.work_order.work_order.make_stock_entry"
+GET_PE = "erpnext.accounts.doctype.payment_entry.payment_entry.get_payment_entry"
+RUN_REPORT = "frappe.desk.query_report.run"
 
 class ERPError(Exception):
     pass
@@ -67,6 +82,50 @@ class ERP:
 
 def whoami(erp):
     return erp.call("frappe.auth.get_logged_user")
+
+
+# ---------------------------------------------------------------- stare (idempotență)
+
+
+class State:
+    """seed_state.json: ID pas seed -> nume document ERPNext, separat pe fiecare site.
+
+    Dacă site-ul a fost recreat (altă dată de creare a companiei), starea veche se ignoră.
+    """
+
+    def __init__(self, erp, company):
+        self.all = json.loads(STATE_FILE.read_text(encoding="utf-8")) if STATE_FILE.exists() else {}
+        created = erp.get("Company", company)["creation"]
+        site = self.all.get(erp.url, {})
+        if site.get("_company_created") != created:
+            site = {"_company_created": created}
+        self.all[erp.url] = self.data = site
+        self.save()
+
+    def get(self, key):
+        return self.data.get(key)
+
+    def set(self, key, name):
+        self.data[key] = name
+        self.save()
+
+    def save(self):
+        STATE_FILE.write_text(json.dumps(self.all, indent=2, ensure_ascii=False), encoding="utf-8")
+
+
+def step(erp, state, key, doctype, build, submit=None):
+    """Rulează pasul `key` o singură dată: build() -> document nesalvat, apoi insert + submit."""
+    name = state.get(key)
+    doc = erp.get(doctype, name) if name else None
+    if doc and doc["docstatus"] == 1:
+        print(f"  = {key}: {name} (exista deja)")
+        return doc
+    if not doc or doc["docstatus"] == 2:
+        doc = erp.insert(build())
+        state.set(key, doc["name"])
+    doc = (submit or erp.submit)(doc)
+    print(f"  + {key}: {doc['name']}")
+    return doc
 
 
 # ---------------------------------------------------------------- master data
@@ -151,6 +210,195 @@ def ensure_bom(erp, data):
     return doc["name"]
 
 
+# ---------------------------------------------------------------- tranzacții
+
+
+def payment(erp, dt, dn, ref):
+    pe = erp.call(GET_PE, dt=dt, dn=dn)
+    pe["reference_no"] = f"SEED-{ref}"  # obligatorii dacă contul e de tip Bank
+    pe["reference_date"] = str(TODAY)
+    return pe
+
+
+def purchase(erp, state, tx, data):
+    k = tx["id"]
+    raw = data["warehouses"]["raw"]
+    items = [{**i, "schedule_date": NEXT_WEEK, "warehouse": raw} for i in tx["items"]]
+    print(f"{k}: achizitie {tx['supplier']}")
+
+    if tx.get("material_request"):
+        mr = step(
+            erp,
+            state,
+            f"{k}.material_request",
+            "Material Request",
+            lambda: {
+                "doctype": "Material Request",
+                "material_request_type": "Purchase",
+                "company": data["company"],
+                "schedule_date": NEXT_WEEK,
+                "items": items,
+            },
+        )
+
+        def build_po():
+            po = erp.call(MAKE_PO_FROM_MR, source_name=mr["name"])
+            po["supplier"] = tx["supplier"]
+            return po
+    else:
+
+        def build_po():
+            return {
+                "doctype": "Purchase Order",
+                "supplier": tx["supplier"],
+                "company": data["company"],
+                "schedule_date": NEXT_WEEK,
+                "set_warehouse": raw,
+                "items": items,
+            }
+
+    po = step(erp, state, f"{k}.purchase_order", "Purchase Order", build_po)
+    pr = step(erp, state, f"{k}.purchase_receipt", "Purchase Receipt",
+        lambda: erp.call(MAKE_PR, source_name=po["name"]))
+    pi = step(erp, state, f"{k}.purchase_invoice", "Purchase Invoice",
+        lambda: erp.call(MAKE_PI, source_name=pr["name"]))
+    if tx.get("pay"):
+        step(erp, state, f"{k}.payment_entry", "Payment Entry",
+            lambda: payment(erp, "Purchase Invoice", pi["name"], k))
+
+
+def manufacture(erp, state, tx, data, bom):
+    k = tx["id"]
+    wh = data["warehouses"]
+    print(f"{k}: productie {tx['qty']} x {tx['item']}")
+    wo = step(
+        erp,
+        state,
+        f"{k}.work_order",
+        "Work Order",
+        lambda: {
+            "doctype": "Work Order",
+            "production_item": tx["item"],
+            "bom_no": bom,
+            "qty": tx["qty"],
+            "company": data["company"],
+            "source_warehouse": wh["raw"],
+            "wip_warehouse": wh["wip"],
+            "fg_warehouse": wh["fg"],
+        },
+    )
+    for purpose, key in (("Material Transfer for Manufacture", "transfer"), ("Manufacture", "manufacture")):
+        step(erp, state, f"{k}.{key}", "Stock Entry",
+            lambda purpose=purpose: erp.call(MAKE_SE, work_order_id=wo["name"], purpose=purpose, qty=tx["qty"]))
+
+
+def confirm_sales_order(erp, so):
+    return erp.submit(so)
+
+
+def sales_order_doc(tx, data):
+    doc = {
+        "doctype": "Sales Order",
+        "customer": tx["customer"],
+        "company": data["company"],
+        "delivery_date": NEXT_WEEK,
+        "set_warehouse": data["warehouses"]["fg"],
+        "items": [{**i, "delivery_date": NEXT_WEEK} for i in tx["items"]],
+    }
+    if tx.get("installation_notes"):
+        doc["installation_notes"] = tx["installation_notes"]
+    return doc
+
+
+def sale(erp, state, tx, data):
+    k = tx["id"]
+    print(f"{k}: vanzare {tx['customer']}")
+    if tx.get("quotation"):
+        qtn = step(
+            erp,
+            state,
+            f"{k}.quotation",
+            "Quotation",
+            lambda: {
+                "doctype": "Quotation",
+                "quotation_to": "Customer",
+                "party_name": tx["customer"],
+                "company": data["company"],
+                "items": tx["items"],
+            },
+        )
+
+        def build_so():
+            so = erp.call(MAKE_SO_FROM_QTN, source_name=qtn["name"])
+            so["delivery_date"] = NEXT_WEEK
+            so["set_warehouse"] = data["warehouses"]["fg"]
+            for row in so["items"]:
+                row["delivery_date"] = NEXT_WEEK
+            if tx.get("installation_notes"):
+                so["installation_notes"] = tx["installation_notes"]
+            return so
+    else:
+
+        def build_so():
+            return sales_order_doc(tx, data)
+
+    so = step(erp, state, f"{k}.sales_order", "Sales Order", build_so,
+        submit=lambda doc: confirm_sales_order(erp, doc))
+    if not tx.get("deliver"):
+        return
+    dn = step(erp, state, f"{k}.delivery_note", "Delivery Note",
+        lambda: erp.call(MAKE_DN, source_name=so["name"]))
+    si = step(erp, state, f"{k}.sales_invoice", "Sales Invoice",
+        lambda: erp.call(MAKE_SI, source_name=dn["name"]))
+    if tx.get("pay"):
+        step(erp, state, f"{k}.payment_entry", "Payment Entry",
+            lambda: payment(erp, "Sales Invoice", si["name"], k))
+
+
+# ---------------------------------------------------------------- verificare (secțiunea 3.7)
+
+
+def report_rows(erp, report_name, filters):
+    result = erp.call(RUN_REPORT, report_name=report_name, filters=filters, ignore_prepared_report=True)
+    return [row for row in result["result"] if isinstance(row, dict)]
+
+
+def verify(erp, state, data):
+    company = data["company"]
+    exp = data["expected"]
+    ok = True
+
+    def check(label, actual, expected):
+        nonlocal ok
+        good = abs(float(actual or 0) - float(expected)) < 0.01
+        ok = ok and good
+        print(f"  {'OK ' if good else 'NOK'}  {label:<48} asteptat {expected:>9}  obtinut {actual or 0:>9}")
+
+    print("Verificare (sectiunea 3.7)")
+    rows = report_rows(erp, "Stock Balance",
+        {"company": company, "from_date": f"{TODAY.year}-01-01", "to_date": str(TODAY)})
+    balance = {(r.get("item_code"), r.get("warehouse")): r.get("bal_qty") for r in rows}
+    for line in exp["stock"]:
+        check(f"Stoc {line['item_code']} @ {line['warehouse']}",
+            balance.get((line["item_code"], line["warehouse"])), line["qty"])
+    check(f"Stoc total @ {exp['empty_warehouse']}",
+        sum(q or 0 for (_, w), q in balance.items() if w == exp["empty_warehouse"]), 0)
+
+    common = {"company": company, "report_date": str(TODAY), "ageing_based_on": "Due Date",
+        "range": "30, 60, 90, 120"}
+    receivable = {}
+    for r in report_rows(erp, "Accounts Receivable", {**common, "party_type": "Customer"}):
+        if r.get("party"):
+            receivable[r["party"]] = receivable.get(r["party"], 0) + (r.get("outstanding") or 0)
+    for party, amount in exp["receivable"].items():
+        check(f"De incasat de la {party}", receivable.get(party, 0), amount)
+    payable = sum(r.get("outstanding") or 0
+        for r in report_rows(erp, "Accounts Payable", {**common, "party_type": "Supplier"})
+        if r.get("party"))
+    check("De platit (toti furnizorii)", payable, exp["payable_total"])
+    return ok
+
+
 # ---------------------------------------------------------------- main
 
 
@@ -170,9 +418,21 @@ def main():
     data = json.loads(DATA_FILE.read_text(encoding="utf-8"))
     erp = ERP(os.environ["ERP_URL"], os.environ["ERP_KEY"], os.environ["ERP_SECRET"])
     print(f"Site: {erp.url} (user {whoami(erp)})")
+    state = State(erp, data["company"])
 
     bom = seed_master_data(erp, data)
-    print(f"\nMaster data OK (BOM implicit: {bom})")
+    for tx in data["transactions"]:
+        if tx["type"] == "purchase":
+            purchase(erp, state, tx, data)
+        elif tx["type"] == "manufacture":
+            manufacture(erp, state, tx, data, bom)
+        elif tx["type"] == "sale":
+            sale(erp, state, tx, data)
+
+    if not verify(erp, state, data):
+        print("\nREZULTAT: valorile NU corespund cu sectiunea 3.7")
+        sys.exit(1)
+    print("\nREZULTAT: toate verificarile au trecut")
 
 
 if __name__ == "__main__":
