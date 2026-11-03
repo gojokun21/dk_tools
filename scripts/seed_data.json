@@ -1,0 +1,79 @@
+{
+  "company": "Demo Kit SRL",
+  "uoms": ["Buc"],
+  "item_groups": ["Componente", "Produse", "Servicii"],
+  "warehouses": {
+    "parent": "All Warehouses - DK",
+    "raw": "Materii Prime - DK",
+    "wip": "Lucru in Curs - DK",
+    "fg": "Produse Finite - DK"
+  },
+  "items": [
+    {
+      "item_code": "CMP-CARCASA",
+      "item_name": "Carcasă plastic",
+      "item_group": "Componente",
+      "is_stock_item": 1,
+      "default_warehouse": "Materii Prime - DK",
+      "buying_rate": 20
+    },
+    {
+      "item_code": "CMP-PLACA",
+      "item_name": "Placă electronică",
+      "item_group": "Componente",
+      "is_stock_item": 1,
+      "default_warehouse": "Materii Prime - DK",
+      "buying_rate": 80
+    },
+    {
+      "item_code": "CMP-SENZOR",
+      "item_name": "Senzor temperatură",
+      "item_group": "Componente",
+      "is_stock_item": 1,
+      "default_warehouse": "Materii Prime - DK",
+      "buying_rate": 40
+    },
+    {
+      "item_code": "CMP-CABLU",
+      "item_name": "Cablu USB",
+      "item_group": "Componente",
+      "is_stock_item": 1,
+      "default_warehouse": "Materii Prime - DK",
+      "buying_rate": 10
+    },
+    {
+      "item_code": "KIT-TEMP",
+      "item_name": "Kit senzor temperatură",
+      "item_group": "Produse",
+      "is_stock_item": 1,
+      "default_warehouse": "Produse Finite - DK",
+      "selling_rate": 450
+    },
+    {
+      "item_code": "SRV-INSTALARE",
+      "item_name": "Instalare la client",
+      "item_group": "Servicii",
+      "is_stock_item": 0,
+      "selling_rate": 300
+    }
+  ],
+  "suppliers": [
+    {"supplier_name": "Electro Parts SRL", "supplier_group": "Raw Material"},
+    {"supplier_name": "Plastix SRL", "supplier_group": "Raw Material"}
+  ],
+  "customers": [
+    {"customer_name": "Alfa Tech SRL", "customer_group": "Commercial", "territory": "Romania"},
+    {"customer_name": "Beta Industries SRL", "customer_group": "Commercial", "territory": "Romania"},
+    {"customer_name": "Gamma Lab SRL", "customer_group": "Commercial", "territory": "Romania"}
+  ],
+  "bom": {
+    "item": "KIT-TEMP",
+    "quantity": 1,
+    "items": [
+      {"item_code": "CMP-CARCASA", "qty": 1},
+      {"item_code": "CMP-PLACA", "qty": 1},
+      {"item_code": "CMP-SENZOR", "qty": 1},
+      {"item_code": "CMP-CABLU", "qty": 1}
+    ]
+  }
+}
