@@ -277,3 +277,18 @@ app_license = "mit"
 # List of apps whose translatable strings should be excluded from this app's translations.
 # ignore_translatable_strings_from = []
 
+required_apps = ["erpnext"]
+
+doc_events = {
+	"Sales Order": {
+		"validate": "dk_tools.events.sales_order.validate",
+		"on_submit": "dk_tools.events.sales_order.on_submit",
+	}
+}
+
+# Ce setari din baza de date exporta `bench export-fixtures` in dk_tools/fixtures/
+# (filtrat: doar cele doua campuri ale noastre de pe Sales Order)
+fixtures = [
+	{"dt": "Custom Field", "filters": [["dt", "=", "Sales Order"],
+		["fieldname", "in", ["requires_installation", "installation_notes"]]]},
+]
