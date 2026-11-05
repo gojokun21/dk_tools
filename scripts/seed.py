@@ -23,6 +23,8 @@ MAKE_SI = "erpnext.stock.doctype.delivery_note.delivery_note.make_sales_invoice"
 MAKE_SE = "erpnext.manufacturing.doctype.work_order.work_order.make_stock_entry"
 GET_PE = "erpnext.accounts.doctype.payment_entry.payment_entry.get_payment_entry"
 RUN_REPORT = "frappe.desk.query_report.run"
+# Din ziua 7: o acțiune de workflow (Submit / Send for Approval / Approve), ca butoanele din Actions
+APPLY_WORKFLOW = "frappe.model.workflow.apply_workflow"
 
 class ERPError(Exception):
     pass
@@ -210,6 +212,24 @@ def ensure_bom(erp, data):
     return doc["name"]
 
 
+def ensure_user(erp, user):
+    """Creează userul (dacă lipsește) și îi generează o pereche nouă de chei API."""
+    if not erp.get("User", user["email"]):
+        print(f"  + User: {user['email']}")
+        doc = {
+            "doctype": "User",
+            "email": user["email"],
+            "first_name": user["first_name"],
+            "send_welcome_email": 0,
+            "roles": [{"role": r} for r in user["roles"]],
+        }
+        if os.environ.get("DEMO_PASSWORD"):
+            doc["new_password"] = os.environ["DEMO_PASSWORD"]
+        erp.insert(doc)
+    keys = erp.call("frappe.core.doctype.user.user.generate_keys", user=user["email"])
+    return ERP(erp.url, keys["api_key"], keys["api_secret"])
+
+
 # ---------------------------------------------------------------- tranzacții
 
 
@@ -293,7 +313,8 @@ def manufacture(erp, state, tx, data, bom):
 
 
 def confirm_sales_order(erp, so):
-    return erp.submit(so)
+    """Din ziua 7 Sales Order are workflow: submit-ul se face prin acțiunea „Submit”."""
+    return erp.call(APPLY_WORKFLOW, doc=so, action="Submit")
 
 
 def sales_order_doc(tx, data):
@@ -355,6 +376,25 @@ def sale(erp, state, tx, data):
             lambda: payment(erp, "Sales Invoice", si["name"], k))
 
 
+def sale_with_approval(state, tx, data, sales, manager):
+    """S3: creat și trimis la aprobare de Sales User, aprobat de Sales Manager."""
+    k = tx["id"]
+    print(f"{k}: vanzare cu aprobare {tx['customer']}")
+    name = state.get(f"{k}.sales_order")
+    so = sales.get("Sales Order", name) if name else None
+    if not so or so["docstatus"] == 2:
+        so = sales.insert(sales_order_doc(tx, data))
+        state.set(f"{k}.sales_order", so["name"])
+    if so["workflow_state"] == "Draft":
+        so = sales.call(APPLY_WORKFLOW, doc=so, action="Send for Approval")
+        print(f"  + {so['name']}: Draft -> {so['workflow_state']} (de {whoami(sales)})")
+    if so["workflow_state"] == "Pending Approval":
+        so = manager.call(APPLY_WORKFLOW, doc=so, action="Approve")
+        print(f"  + {so['name']}: Pending Approval -> {so['workflow_state']} (de {whoami(manager)})")
+    else:
+        print(f"  = {so['name']}: {so['workflow_state']} (exista deja)")
+
+
 # ---------------------------------------------------------------- verificare (secțiunea 3.7)
 
 
@@ -396,6 +436,16 @@ def verify(erp, state, data):
         for r in report_rows(erp, "Accounts Payable", {**common, "party_type": "Supplier"})
         if r.get("party"))
     check("De platit (toti furnizorii)", payable, exp["payable_total"])
+
+    # Din ziua 7: cererea de instalare pentru S1 și comanda S3 aprobată prin workflow
+    s1 = state.get("S1.sales_order")
+    check(f"Installation Request pentru S1 ({s1})",
+        len(erp.get_list("Installation Request", [["sales_order", "=", s1]])), 1)
+    approved = exp["approved_order"]
+    so = erp.get("Sales Order", state.get(f"{approved['id']}.sales_order"))
+    check(f"{approved['id']} aprobat ({so['workflow_state']}), docstatus", so["docstatus"], 1)
+    check(f"{approved['id']} valoare", so["grand_total"], approved["grand_total"])
+    check(f"{approved['id']} livrat %", so["per_delivered"], 0)
     return ok
 
 
@@ -421,6 +471,9 @@ def main():
     state = State(erp, data["company"])
 
     bom = seed_master_data(erp, data)
+    print("Useri")
+    users = {role: ensure_user(erp, user) for role, user in data["users"].items()}
+
     for tx in data["transactions"]:
         if tx["type"] == "purchase":
             purchase(erp, state, tx, data)
@@ -428,6 +481,8 @@ def main():
             manufacture(erp, state, tx, data, bom)
         elif tx["type"] == "sale":
             sale(erp, state, tx, data)
+        elif tx["type"] == "sale_with_approval":
+            sale_with_approval(state, tx, data, users["sales"], users["manager"])
 
     if not verify(erp, state, data):
         print("\nREZULTAT: valorile NU corespund cu sectiunea 3.7")

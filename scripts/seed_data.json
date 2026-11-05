@@ -76,6 +76,19 @@
       {"item_code": "CMP-CABLU", "qty": 1}
     ]
   },
+  "users": {
+    "sales": {"email": "vanzari@demokit.local", "first_name": "Vanzari", "roles": ["Sales User"]},
+    "manager": {
+      "email": "manager@demokit.local",
+      "first_name": "Manager",
+      "roles": ["Sales User", "Sales Manager"]
+    },
+    "technician": {
+      "email": "tehnician@demokit.local",
+      "first_name": "Tehnician",
+      "roles": ["Installation Technician"]
+    }
+  },
   "transactions": [
     {
       "id": "P1",
@@ -105,6 +118,7 @@
       "quotation": true,
       "deliver": true,
       "pay": true,
+      "installation_notes": "Montaj la sediul clientului, etajul 2.",
       "items": [{"item_code": "KIT-TEMP", "qty": 10}, {"item_code": "SRV-INSTALARE", "qty": 1}]
     },
     {
@@ -115,6 +129,12 @@
       "deliver": true,
       "pay": false,
       "items": [{"item_code": "KIT-TEMP", "qty": 5}]
+    },
+    {
+      "id": "S3",
+      "type": "sale_with_approval",
+      "customer": "Gamma Lab SRL",
+      "items": [{"item_code": "KIT-TEMP", "qty": 30}]
     }
   ],
   "expected": {
@@ -127,6 +147,7 @@
     ],
     "empty_warehouse": "Lucru in Curs - DK",
     "receivable": {"Alfa Tech SRL": 0, "Beta Industries SRL": 2250},
-    "payable_total": 0
+    "payable_total": 0,
+    "approved_order": {"id": "S3", "grand_total": 13500}
   }
 }
