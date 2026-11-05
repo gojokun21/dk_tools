@@ -282,13 +282,25 @@ required_apps = ["erpnext"]
 doc_events = {
 	"Sales Order": {
 		"validate": "dk_tools.events.sales_order.validate",
+		"before_submit": "dk_tools.events.sales_order.before_submit",
 		"on_submit": "dk_tools.events.sales_order.on_submit",
 	}
 }
 
-# Ce setari din baza de date exporta `bench export-fixtures` in dk_tools/fixtures/
-# (filtrat: doar cele doua campuri ale noastre de pe Sales Order)
+# Fixtures se importă în ordinea din listă (fișierele primesc prefix 1_, 2_, ...)
+fixture_auto_order = True
+
+# Ce setări din baza de date exportă `bench export-fixtures` în dk_tools/fixtures/
 fixtures = [
+	{"dt": "Role", "filters": [["name", "=", "Installation Technician"]]},
+	# Toate regulile custom de pe Customer, nu doar rândul tehnicianului (vezi capcana din ghid)
+	{"dt": "Custom DocPerm", "filters": [["parent", "=", "Customer"]]},
 	{"dt": "Custom Field", "filters": [["dt", "=", "Sales Order"],
 		["fieldname", "in", ["requires_installation", "installation_notes"]]]},
+	{"dt": "Client Script", "filters": [["dt", "=", "Sales Order"]]},
+	{"dt": "Workflow State", "filters": [["name", "in",
+		["Draft", "Pending Approval", "Approved", "Rejected"]]]},
+	{"dt": "Workflow Action Master", "filters": [["name", "in",
+		["Submit", "Send for Approval", "Approve", "Reject"]]]},
+	{"dt": "Workflow", "filters": [["name", "=", "Sales Order Approval"]]},
 ]

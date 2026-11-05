@@ -74,7 +74,7 @@
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2026-11-03 12:38:38.464952",
+ "modified": "2026-11-04 12:21:59.140915",
  "modified_by": "Administrator",
  "module": "DK Tools",
  "name": "Installation Request",
@@ -98,6 +98,13 @@
    "read": 1,
    "report": 1,
    "role": "Sales Manager",
+   "write": 1
+  },
+  {
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Installation Technician",
    "write": 1
   }
  ],

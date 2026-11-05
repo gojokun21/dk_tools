@@ -1,0 +1,13 @@
+[
+ {
+  "docstatus": 0,
+  "doctype": "Client Script",
+  "dt": "Sales Order",
+  "enabled": 1,
+  "modified": "2026-11-05 02:35:21.901629",
+  "module": null,
+  "name": "Sales Order - Installation",
+  "script": "frappe.ui.form.on(\"Sales Order\", {\r\n          refresh(frm) {\r\n                  frm.toggle_reqd(\"installation_notes\", !!frm.doc.requires_installation);\r\n                  if (frm.doc.docstatus === 1 && frm.doc.requires_installation) {\r\n                          frm.add_custom_button(__(\"Installation Requests\"), () =>\r\n                                  frappe.set_route(\"List\", \"Installation Request\", { sales_order: frm.doc.name })\r\n                          );\r\n                  }\r\n          },\r\n  });",
+  "view": "Form"
+ }
+]
